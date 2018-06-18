@@ -8,13 +8,13 @@ import os
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route('/', methods = ['POST', 'GET'])
 def hello_world():
     app.logger.info('Test info')
     app.logger.error('Test error')
     app.logger.warning('Test warning')
     response = {
-        "status": "Hello World"
+        "status": "Its working!"
     }
     return make_response(jsonify(response), 200)
 
