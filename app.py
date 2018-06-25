@@ -1,38 +1,33 @@
-from flask import Flask, request, jsonify, make_response, abort
+from json import dumps
+from flask import Flask, request, jsonify, abort, Response
 from sys import stderr
 import hmac
 import os
-from json import dumps
-# import logging
-# logging.basicConfig(stream=stderr)
-
+import requests
 app = Flask(__name__)
+app.config.from_pyfile('settings.cfg')
+config = app.config
 
 
 @app.route('/', methods=['GET'])
 def hello_world():
-    app.logger.info('Test info')
-    app.logger.error('Test error')
-    app.logger.warning('Test warning')
-    response = {
-        "status": "Its working!"
+    app.logger.info("Heimdall it's working!")
+    data = {
+        "msg": "Heimdall it's working!"
     }
-    return make_response(jsonify(response), 200)
+
+    return Response(dumps(data), status=200, mimetype='application/json')
 
 
-@app.route('/circleci/webhook', methods=['POST', 'GET'])
+@app.route('/circleci/webhook', methods=['POST'])
 def webhook():
-    if request.method == 'GET':
-        response = {"msg": "Its working!"}
-        return make_response(jsonify(response), 200)
-
     # Ping github
     event = request.headers.get('X-GitHub-Event', 'ping')
     if event == 'ping':
-        return make_response(jsonify({'msg': 'pong'}), 200)
+        return Response(dumps({'msg': 'pong'}), status=200, mimetype='application/json')
     elif event != 'delete':
-        app.logger.warning('Event '+ event + ' not supported')
-        return make_response(jsonify({'msg': 'Event '+ event + ' not supported'}), 400)
+        app.logger.warning('Event ' + event + ' not supported')
+        return Response(dumps({'msg': 'Event ' + event + ' not supported'}), status=400, mimetype='application/json')
 
     # Enforce secret
     secret = os.environ.get('GIT_SECRET_KEY')
@@ -53,49 +48,76 @@ def webhook():
         if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
             abort(403)
 
-    # Gather data
+    # Get environment variables
+    try:
+        job_ci = os.environ.get('JOB_CI')
+        user_token = os.environ.get('USER_TOKEN')
+    except Exception:
+        app.logger.error('Error to get environment variables')
+        return Response(dumps({'msg': 'Error to get environment variables'}), status=400, mimetype='application/json')
+
+    # Get config variables
+    try:
+        ci_url_base = config['CI_BASE_URL']
+    except Exception:
+        app.logger.error('Error to get config variables')
+        return Response(dumps({'msg': 'Error to get config variables'}), status=400, mimetype='application/json')
+
+    # Get data
     try:
         payload = request.get_json()
     except Exception:
-        app.logger.warning('Request parsing failed')
-        return make_response(jsonify({'msg': 'Request parsing failed'}), 400)
+        app.logger.error('Request parsing failed')
+        return Response(dumps({'msg': 'Request parsing failed'}), status=400, mimetype='application/json')
 
     if 'ref_type' in payload:
         if payload['ref_type'] == 'branch':
             branch = payload['ref']
         else:
             app.logger.warning('ref_type not supported')
-            return make_response(jsonify({'msg': 'ref_type not supported.'}), 400)
+            return Response(dumps({'msg': 'ref_type not supported.'}), status=400, mimetype='application/json')
     else:
-        app.logger.warning('Json struct not supported. ref_type required.')
-        return make_response(jsonify({'msg': 'Json struct not supported. ref_type required.'}), 400)
+        app.logger.error('Json struct not supported. ref_type required.')
+        return Response(dumps({'msg': 'Json struct not supported. ref_type required.'}), status=400, mimetype='application/json')
 
-    name = payload['repository']['name'] if 'repository' in payload else None
+    try:
+        repo_path = payload['repository']['full_name']
+    except Exception:
+        app.logger.error('Error to get repository name.')
+        return Response(dumps({'msg': 'Error to get repository name.'}), status=400, mimetype='application/json')
+
+
+    ci_url = ci_url_base.replace('{repo_path}', repo_path)
+
+    data = {
+        "build_parameters": {
+            "CIRCLE_JOB": job_ci,
+            "DELETED_BRANCH": branch
+        }
+    }
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': 'Basic ' + user_token
+    }
 
     meta = {
-        'name': name,
+        'repo': repo_path,
         'branch': branch,
         'event': event
     }
 
     app.logger.info('Metadata:\n{}'.format(dumps(meta)))
 
+    try:
+        response = requests.post(ci_url, data=dumps(data), headers=headers)
+    except Exception:
+        app.logger.error('Error to posting to CI')
+        return Response(dumps({'msg': 'Error to posting to CI'}), status=400, mimetype='application/json')
 
-    # secret = request.json["hook"]["config"]["secret"]
+    return Response(status=200)
 
-    # app.logger.warning("secret: ########################" + request.headers.get('X-Hub-Signature'))
-    # app.logger.warning("data: ########################" + str(request.data))
-    # delete_branch(trigger_type)
-    # git_secret_key = os.environ.get('GIT_SECRET_KEY')
-    response = {
-        "Status": "CircleCI webhook working",
-    }
-    return make_response(jsonify(response), 200)
-
-
-# def delete_branch(trigger_type):
-
-#     return("Delete")
 
 if __name__ == '__main__':
     app.run()
