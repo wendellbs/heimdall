@@ -6,8 +6,6 @@ import os
 import requests
 import re
 app = Flask(__name__)
-app.config.from_pyfile('settings.cfg')
-config = app.config
 
 
 @app.route('/', methods=['GET'])
@@ -54,7 +52,7 @@ def webhook():
             abort(501)
 
         # HMAC requires the key to be bytes, but data is string
-        mac = hmac.new(str(secret), msg=request.data, digestmod='sha1')
+        mac = hmac.new(bytes(secret, 'UTF-8'), msg=request.data, digestmod='sha1')
 
         if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
             abort(403)
