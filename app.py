@@ -74,8 +74,8 @@ def webhook():
         regex = prefix_branch.replace('/', '\/')
         regex = "^" + prefix_branch.replace('-', '\-')
         if not re.search(regex, branch):
-            app.logger.warning('Branch ' + branch + ' not supported')
-            return Response(dumps({'msg': 'Branch ' + branch + ' not supported.'}), status=400, mimetype='application/json')
+            app.logger.warning('Branch ' + branch + ' ignored')
+            return Response(dumps({'msg': 'Branch ' + branch + ' ignored.'}), status=200, mimetype='application/json')
 
     else:
         app.logger.error('Json struct not supported. ref_type required.')
