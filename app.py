@@ -4,6 +4,7 @@ from sys import stderr
 import hmac
 import os
 import requests
+import re
 app = Flask(__name__)
 app.config.from_pyfile('settings.cfg')
 config = app.config
@@ -19,7 +20,7 @@ def hello_world():
     return Response(dumps(data), status=200, mimetype='application/json')
 
 
-@app.route('/circleci/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     # Ping github
     event = request.headers.get('X-GitHub-Event', 'ping')
@@ -28,6 +29,16 @@ def webhook():
     elif event != 'delete':
         app.logger.warning('Event ' + event + ' not supported')
         return Response(dumps({'msg': 'Event ' + event + ' not supported'}), status=400, mimetype='application/json')
+
+    # Get environment variables
+    job_ci = os.environ.get('JOB_CI')
+    user_token = os.environ.get('USER_TOKEN')
+    ci_url_base = os.environ.get('CI_BASE_URL')
+    prefix_branch = os.environ.get('PREFIX_BRANCH').lower()
+
+    if job_ci==None or user_token==None or ci_url_base==None or prefix_branch==None:
+        app.logger.error('Environment variables cannot be null')
+        return Response(dumps({'msg': 'Environment variables cannot be null'}), status=400, mimetype='application/json')
 
     # Enforce secret
     secret = os.environ.get('GIT_SECRET_KEY')
@@ -48,21 +59,6 @@ def webhook():
         if not hmac.compare_digest(str(mac.hexdigest()), str(signature)):
             abort(403)
 
-    # Get environment variables
-    try:
-        job_ci = os.environ.get('JOB_CI')
-        user_token = os.environ.get('USER_TOKEN')
-    except Exception:
-        app.logger.error('Error to get environment variables')
-        return Response(dumps({'msg': 'Error to get environment variables'}), status=400, mimetype='application/json')
-
-    # Get config variables
-    try:
-        ci_url_base = config['CI_BASE_URL']
-    except Exception:
-        app.logger.error('Error to get config variables')
-        return Response(dumps({'msg': 'Error to get config variables'}), status=400, mimetype='application/json')
-
     # Get data
     try:
         payload = request.get_json()
@@ -76,6 +72,13 @@ def webhook():
         else:
             app.logger.warning('ref_type not supported')
             return Response(dumps({'msg': 'ref_type not supported.'}), status=400, mimetype='application/json')
+
+        regex = prefix_branch.replace('/', '\/')
+        regex = "^" + prefix_branch.replace('-', '\-')
+        if not re.search(regex, branch):
+            app.logger.warning('Branch ' + branch + ' not supported')
+            return Response(dumps({'msg': 'Branch ' + branch + ' not supported.'}), status=400, mimetype='application/json')
+
     else:
         app.logger.error('Json struct not supported. ref_type required.')
         return Response(dumps({'msg': 'Json struct not supported. ref_type required.'}), status=400, mimetype='application/json')
@@ -85,7 +88,6 @@ def webhook():
     except Exception:
         app.logger.error('Error to get repository name.')
         return Response(dumps({'msg': 'Error to get repository name.'}), status=400, mimetype='application/json')
-
 
     ci_url = ci_url_base.replace('{repo_path}', repo_path)
 
